@@ -1,49 +1,63 @@
-// File: functions/api/videos.js
+/**
+ * Cloudflare Pages Function
+ * File: /functions/api/videos.js
+ *
+ * Versi DINAMIS:
+ * Endpoint ini sekarang mengambil video paling populer dari YouTube.
+ */
 
-// Daftar video default untuk halaman utama
-const DEFAULT_VIDEO_IDS = [
-  'zh0P40GfvFA',
-  'PssKpzB0Ah0',
-  'mkUdveY0cFQ',
-  'nFXPcdSv0qA',
-  'NGSn5cY0o3k'
-];
+// --- KONFIGURASI DINAMIS ---
+const REGION_CODE = 'ID'; // Ganti ke 'US' untuk Amerika, 'SG' untuk Singapura, dll.
+const MAX_RESULTS = 12;   // Jumlah video yang ingin ditampilkan (maksimal 50)
 
+
+// --- LOGIKA UTAMA WORKER ---
 export async function onRequest(context) {
+  // Header CORS
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+  };
+
   try {
     const { request, env } = context;
-    const url = new URL(request.url);
 
-    // Dapatkan ID video dari parameter URL (misal: /api/videos?id=xxxx)
-    const urlParamId = url.searchParams.get('id');
-    
-    // Jika tidak ada ID di URL, gunakan daftar default. Jika ada, gunakan ID itu.
-    const videoIdsToFetch = urlParamId ? urlParamId : DEFAULT_VIDEO_IDS.join(',');
+    // Menangani permintaan preflight CORS
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: corsHeaders });
+    }
 
-    // Ambil Kunci API dari secret yang sudah Anda set di dasbor Cloudflare
     const apiKey = env.YOUTUBE_API_KEY;
 
     if (!apiKey) {
-        return new Response(JSON.stringify({ error: 'YouTube API key is not configured.' }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-        });
+      const errorResponse = { error: 'YouTube API key is not configured on the server.' };
+      return new Response(JSON.stringify(errorResponse), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
-    const ytApiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${videoIdsToFetch}&key=${apiKey}`;
-
+    // --- PERUBAHAN UTAMA ADA DI SINI ---
+    // Kita tidak lagi menggunakan daftar ID video statis.
+    // Kita sekarang memanggil endpoint 'videos' dengan parameter 'chart=mostPopular'.
+    const ytApiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&chart=mostPopular&regionCode=${REGION_CODE}&maxResults=${MAX_RESULTS}&key=${apiKey}`;
+    
+    // Panggil API YouTube
     const ytResponse = await fetch(ytApiUrl);
     const data = await ytResponse.json();
 
     if (!ytResponse.ok || data.error) {
-      return new Response(JSON.stringify({ error: 'YouTube API error', details: data }), {
+      const errorDetails = data.error ? data.error.message : `Status code: ${ytResponse.status}`;
+      const errorResponse = { error: 'Failed to fetch data from YouTube API.', details: errorDetails };
+      return new Response(JSON.stringify(errorResponse), {
         status: ytResponse.status,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // Format data agar mudah digunakan di frontend
-    const videos = data.items.map(item => ({
+    // Proses pemformatan data tetap sama seperti sebelumnya, karena struktur data dari YouTube mirip.
+    const formattedVideos = data.items.map(item => ({
       id: item.id,
       title: item.snippet.title,
       thumbnail: item.snippet.thumbnails.high.url,
@@ -53,14 +67,16 @@ export async function onRequest(context) {
       publishedAt: item.snippet.publishedAt,
     }));
 
-    return new Response(JSON.stringify(videos), {
-      headers: { 'Content-Type': 'application/json' },
+    return new Response(JSON.stringify(formattedVideos), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: 'Failed to fetch videos', details: err.message }), {
+    const errorResponse = { error: 'An unexpected error occurred.', details: err.message };
+    return new Response(JSON.stringify(errorResponse), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 }
